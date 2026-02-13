@@ -1,6 +1,10 @@
+from dotenv import load_dotenv
+import os
 import torch
 from torch.nn import functional as F
 import torch.nn as nn
+
+load_dotenv()
 
 # MODEL WEIGHTS
 DIM_EMBEDDING = 256
@@ -10,13 +14,18 @@ N_HEAD_ATTENTION = 8
 
 # PICTURE
 N_CONTEXT = 768 # num of patched in picture
-W = 640
-H = 480
+W = int(os.getenv("W"))
+H = int(os.getenv("H"))
 KERNEL = 20
+
+# TRAINING PARAMETERS
+
+
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+@torch.no_grad()
 def precompute_theta_per_frequencies(head_size: int, theta = 10000.0):
     m_x = torch.arange(0, W // KERNEL).repeat(H // KERNEL)
     m_y = torch.arange(0, H // KERNEL).repeat_interleave(W // KERNEL - 1)
@@ -35,6 +44,7 @@ def precompute_theta_per_frequencies(head_size: int, theta = 10000.0):
     # freqs_complex = torch.polar(torch.ones_like(freqs), freqs) # convert to complex space based on Euler's formula e ^ (it)
     # return freqs_complex #(T, head_size // 2)
 
+@torch.no_grad()
 def apply_rotary_embeddings(x: torch.Tensor, freqs_complex_x: torch.Tensor, freqs_complex_y: torch.Tensor):
     v_x, v_y = torch.chunk(x, 2, dim=-1) # each: (B, T, head_size // 2)
     v_x_complex = torch.view_as_complex(v_x.float().reshape(*v_x.shape[:-1], -1, 2)) # (B, T, head_size // 4)
@@ -90,7 +100,7 @@ class MultiHeadAttention(nn.Module):
     def forward(self, x):
         out = torch.cat([h(x) for h in self.heads], dim=-1)
         out = self.proj(out)
-        return out # (B, T, N_HEAD_ATTENTION x DIM_ATTENTION)
+        return out # (B, T, DIM_EMBEDDING)
 
 class FeedForward(nn.Module):
     def __init__(self):
@@ -109,10 +119,12 @@ class ResBlock(nn.Module):
         super().__init__()
         self.att = MultiHeadAttention(N_HEAD_ATTENTION)
         self.mlp = FeedForward()
+        self.ln1 = nn.LayerNorm(DIM_EMBEDDING)
+        self.ln2 = nn.LayerNorm(DIM_EMBEDDING)
     def forward(self, x):
-        y = x + self.att(x)
-        y = self.mlp(y)
-        return x + y
+        x = x + self.att(self.ln1(x))
+        x = x + self.mlp(self.ln2(x))
+        return x
 
 class Encoder(nn.Module):
     def __init__(self):
@@ -125,8 +137,9 @@ class Encoder(nn.Module):
 
     def forward(self, x):
         x_emb = self.w_emb(x)
-        x = self.wha(x_emb)
-        x = self.mlp(x)
+        x = self.transformers(x_emb)
+
+
 
 
 
