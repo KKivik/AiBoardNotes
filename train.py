@@ -3,6 +3,7 @@ import os
 import torch
 from torch.nn import functional as F
 import torch.nn as nn
+from prepare_data import ds_train, ds_test
 
 load_dotenv()
 
