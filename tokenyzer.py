@@ -8,9 +8,16 @@ class Tokenyzer:
         with open('tokenyzer/idx_to_byte.pkl', 'rb') as f:
             self.vocab = pickle.load(f)
 
+        # [301] - formula_start; [302] formula_end; [303] - padding
+        self.formula_start = 301
+        self.formula_end = 302
+        self.padding = 303
+        self.service_tokens = set([self.formula_start, self.formula_end, self.padding])
+        self.max_len = 190 - 2 # под BOS и EOS
+
     def decode(self, ids):
         # ids - list of integers [1, 265, 3]
-        tokens = b"".join(self.vocab[x] for x in ids)
+        tokens = b"".join(self.vocab[x] for x in ids if x not in self.service_tokens)
         text = tokens.decode("utf-8", errors="replace")
         return text
 
@@ -27,6 +34,10 @@ class Tokenyzer:
                 break  # nothing else can be merged
             idx = self.merges[pair]
             tokens = self.merge(idx, pair, tokens)
+
+        # cut_tokens = tokens[:self.max_len]
+        # pad_len = self.max_len - len(cut_tokens)
+
         return tokens
 
     def merge(self, idx, focus, txt_copy):

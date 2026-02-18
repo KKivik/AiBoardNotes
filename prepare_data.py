@@ -8,12 +8,14 @@ import torch
 import numpy as np
 import random
 from PIL import Image, ImageOps
+from tokenyzer import Tokenyzer
 
 load_dotenv()
 
 W = int(os.getenv("W"))
 H = int(os.getenv("H"))
 
+Tkn = Tokenyzer()
 
 class SmartResizer(torch.nn.Module):
     def forward(self, img):
@@ -57,6 +59,12 @@ class PreparedDataset(Dataset):
             SmartResizer(),
             transforms.Normalize(mean=[0.5], std=[0.5]),
         ])
+        # [301] - formula_start; [302] formula_end; [303] - padding
+        self.formula_start = 301
+        self.formula_end = 302
+        self.padding = 303
+        self.service_tokens = set([self.formula_start, self.formula_end, self.padding])
+        self.max_len = 190  # + под BOS и EOS
 
     def __len__(self):
         return len(self.dataset)
@@ -64,7 +72,18 @@ class PreparedDataset(Dataset):
     def __getitem__(self, idx):
         sample = self.dataset[idx]
         image = self.transform(sample["image"])
-        return image, sample["latex"]
+
+        latex = Tkn.encode(sample["latex"])
+        cut_latex = latex[:self.max_len - 2]
+        cut_latex = [self.formula_start] + cut_latex + [self.formula_end]
+
+        latex_x = cut_latex[:-1]
+        latex_y = cut_latex[1:]
+        pad_len = self.max_len - len(latex_x)
+        latex_x = latex_x + [self.padding] * pad_len
+        latex_y = latex_y + [self.padding] * pad_len
+
+        return image, latex_x, latex_y # (X:image, latex_x:latex_in, latex_y: target)
 
 
 # путь при скачивании
