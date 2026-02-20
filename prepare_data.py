@@ -1,5 +1,5 @@
 from datasets import load_dataset
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from tqdm import trange
 from dotenv import load_dotenv
@@ -27,6 +27,7 @@ class SmartResizer(torch.nn.Module):
                 transforms.Resize((int(k * img_h), int(k * img_w)))
             ])
             img = resizer(img)
+        img_h, img_w = img.shape[-2:]
         dx = W - img_w
         dy = H - img_h
         pl = 0  # left
@@ -73,6 +74,11 @@ class PreparedDataset(Dataset):
         sample = self.dataset[idx]
         image = self.transform(sample["image"])
 
+        unfold = torch.nn.Unfold(kernel_size=20, stride=20, padding=0)
+        image = image.unsqueeze(1) # for torch.nn.Unfold
+        image = unfold(image) # cut on 20x20 patches each sample
+        image = image.permute(0, 2, 1)
+
         latex = Tkn.encode(sample["latex"])
         cut_latex = latex[:self.max_len - 2]
         cut_latex = [self.formula_start] + cut_latex + [self.formula_end]
@@ -83,7 +89,7 @@ class PreparedDataset(Dataset):
         latex_x = latex_x + [self.padding] * pad_len
         latex_y = latex_y + [self.padding] * pad_len
 
-        return image, torch.tensor(latex_x), torch.tensor(latex_y) # (X:image, latex_x:latex_in, latex_y: target)
+        return image.squeeze(0), torch.tensor(latex_x), torch.tensor(latex_y) # (X:image, latex_x:latex_in, latex_y: target)
 
 
 # путь при скачивании
@@ -95,3 +101,6 @@ print("датасет MathWriting-human загружен успешно")
 
 ds_train = PreparedDataset(dataset, mode="train")
 ds_test = PreparedDataset(dataset, mode="test")
+
+dl_train = DataLoader(ds_train, batch_size=128)
+dl_test = DataLoader(ds_test, batch_size=128)
