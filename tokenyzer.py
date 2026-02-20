@@ -58,7 +58,13 @@ class Tokenyzer:
 
         return repl_txt[0]
 
+    def mask_padding(self, x_latex):
+        # in: (B, T)
+        mask = (x_latex != self.padding).int()
+        return mask
+
 if __name__ == "__main__":
     Tkn = Tokenyzer()
     print(Tkn.decode(Tkn.encode("lalala")))
+
 

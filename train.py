@@ -3,13 +3,14 @@ import os
 import torch
 from torch.nn import functional as F
 import torch.nn as nn
-from prepare_data import ds_train, ds_test
+from prepare_data import ds_train, ds_test, Tkn
+
 
 
 load_dotenv()
 
 # MODEL WEIGHTS
-DIM_EMBEDDING = 256
+DIM_IMAGE_EMBEDDING = 256
 DIM_ATTENTION = 32
 D_PIC = 400
 N_HEAD_ATTENTION = 8
@@ -23,6 +24,16 @@ KERNEL = 20
 #TEXT PARAMETERS
 MAX_LEN_OF_TEXT_CONTEXT = 188 + 2 # 188 - max len of tokens sequence (mean text in utf-8). 2 - two special tokens for start and end of sequence
 DIM_TEXT_EMBEDDING = 128
+DIM_TEXT_ATTENTION = 32
+N_HEAD_LATEX_ATTENTION = 8
+VOCAB_SIZE = 303
+
+
+# CROSS-MECHANISM PARAMETERS
+DIM_CROSS_EMBEDDING = 128
+N_HEAD_CROSS_ATTENTION = 8
+DIM_CROSS_ATTENTION = 32
+
 # TRAINING PARAMETERS
 
 
@@ -96,9 +107,9 @@ class AttentionHead(nn.Module):
     def __init__(self, head_size, freqs_complex_x: torch.Tensor, freqs_complex_y: torch.Tensor): # patch dim - dim of embedding space, head_size - dim of head space
         super().__init__()
         self.freqs_complex_x, self.freqs_complex_y = freqs_complex_x, freqs_complex_y
-        self.key = nn.Linear(DIM_EMBEDDING, head_size, bias=False)
-        self.query = nn.Linear(DIM_EMBEDDING, head_size, bias=False)
-        self.value = nn.Linear(DIM_EMBEDDING, head_size, bias=False)
+        self.key = nn.Linear(DIM_IMAGE_EMBEDDING, head_size, bias=False)
+        self.query = nn.Linear(DIM_IMAGE_EMBEDDING, head_size, bias=False)
+        self.value = nn.Linear(DIM_IMAGE_EMBEDDING, head_size, bias=False)
     def forward(self, x):
         B, T, C = x.shape #(batch, count of elements, count of features)
         k = self.key(x) # (B, T, head_size)
@@ -115,24 +126,24 @@ class AttentionHead(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, num_of_heads):
+    def __init__(self):
         super().__init__()
         self.freqs_complex_x, self.freqs_complex_y = precompute_theta_2D_per_frequencies(DIM_ATTENTION)
-        self.heads = nn.ModuleList([AttentionHead(DIM_ATTENTION, self.freqs_complex_x, self.freqs_complex_y) for i in range(num_of_heads)])
-        self.proj = nn.Linear(N_HEAD_ATTENTION * DIM_ATTENTION, DIM_EMBEDDING)
+        self.heads = nn.ModuleList([AttentionHead(DIM_ATTENTION, self.freqs_complex_x, self.freqs_complex_y) for i in range(N_HEAD_ATTENTION)])
+        self.proj = nn.Linear(N_HEAD_ATTENTION * DIM_ATTENTION, DIM_IMAGE_EMBEDDING)
 
     def forward(self, x):
         out = torch.cat([h(x) for h in self.heads], dim=-1)
         out = self.proj(out)
-        return out # (B, T, DIM_EMBEDDING)
+        return out # (B, T, DIM_IMAGE_EMBEDDING)
 
 class FeedForward(nn.Module):
-    def __init__(self):
+    def __init__(self, embedding_in):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(DIM_EMBEDDING, DIM_EMBEDDING * 4),
+            nn.Linear(embedding_in, embedding_in * 4),
             nn.ReLU(),
-            nn.Linear(DIM_EMBEDDING * 4, DIM_EMBEDDING)
+            nn.Linear(embedding_in * 4, embedding_in)
         )
 
     def forward(self, x):
@@ -141,53 +152,148 @@ class FeedForward(nn.Module):
 class ResViTBlock(nn.Module):
     def __init__(self):
         super().__init__()
-        self.att = MultiHeadAttention(N_HEAD_ATTENTION)
-        self.mlp = FeedForward()
-        self.ln1 = nn.LayerNorm(DIM_EMBEDDING)
-        self.ln2 = nn.LayerNorm(DIM_EMBEDDING)
+        self.att = MultiHeadAttention()
+        self.mlp = FeedForward(DIM_IMAGE_EMBEDDING)
+        self.ln1 = nn.LayerNorm(DIM_IMAGE_EMBEDDING)
+        self.ln2 = nn.LayerNorm(DIM_IMAGE_EMBEDDING)
     def forward(self, x):
         x = x + self.att(self.ln1(x))
         x = x + self.mlp(self.ln2(x))
         return x
 
-class AttentionHead_withMask(nn.Module):
-    def __init__(self, head_size, freqs_complex_x: torch.Tensor, freqs_complex_y: torch.Tensor): # patch dim - dim of embedding space, head_size - dim of head space
+class AttentionHead_Latex_withMask(nn.Module):
+    def __init__(self, head_size, freqs_complex: torch.Tensor): # patch dim - dim of embedding space, head_size - dim of head space
         super().__init__()
-        self.freqs_complex_x, self.freqs_complex_y = freqs_complex_x, freqs_complex_y
-        self.key = nn.Linear(DIM_EMBEDDING, head_size, bias=False)
-        self.query = nn.Linear(DIM_EMBEDDING, head_size, bias=False)
-        self.value = nn.Linear(DIM_EMBEDDING, head_size, bias=False)
-    def forward(self, x):
-        B, T, C = x.shape #(batch, count of elements, count of features)
-        k = self.key(x) # (B, T, head_size)
-        k = apply_rotary_1D_embeddings(k, self.freqs_complex_x, self.freqs_complex_y)
+        self.freqs_complex = freqs_complex
+        self.key = nn.Linear(DIM_TEXT_EMBEDDING, head_size, bias=False)
+        self.query = nn.Linear(DIM_TEXT_EMBEDDING, head_size, bias=False)
+        self.value = nn.Linear(DIM_TEXT_EMBEDDING, head_size, bias=False)
+    def forward(self, x_text_emb, x_latex_mask):
+        B, T, C = x_text_emb.shape #(batch, count of elements, count of features)
+        k = self.key(x_text_emb) # (B, T, head_size)
+        k = apply_rotary_1D_embeddings(k, self.freqs_complex)
 
-        q = self.query(x) # (B, T, head_size)
-        q = apply_rotary_1D_embeddings(q, self.freqs_complex_x, self.freqs_complex_y)
+        q = self.query(x_text_emb) # (B, T, head_size)
+        q = apply_rotary_1D_embeddings(q, self.freqs_complex)
 
-        v = self.value(x) # (B, T, head_size)
+        v = self.value(x_text_emb) # (B, T, head_size)
         wei = (q @ k.transpose(-2, -1) / (C ** 0.5)) # (B, T, T)
-        trill = torch.trill(torch.ones((T, T)))
-        wei = wei.masked_fill(trill == 0, float("-inf")) # TRIAL MASK
+        trill = torch.tril(torch.ones((T, T)))
+        wei = wei.masked_fill(trill == 0, float("-inf")) # trial mask
+        wei = wei.masked_fill(x_latex_mask.unsqueeze(1) == 0, float("-inf")) # padding mask (by rows)
         softwei = F.softmax(wei, dim=-1)
         out = softwei @ v
         return out # (B, T, head_size)
 
+class MultiHeadAttention_LaTeX(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.freqs_complex = precompute_theta_1D_per_frequencies(DIM_TEXT_ATTENTION)
+        self.heads = nn.ModuleList([AttentionHead_Latex_withMask(DIM_TEXT_ATTENTION, self.freqs_complex) for i in range(N_HEAD_LATEX_ATTENTION)])
+        self.proj = nn.Linear(N_HEAD_LATEX_ATTENTION * DIM_TEXT_ATTENTION, DIM_TEXT_EMBEDDING)
+
+    def forward(self, x_text_emb, x_latex_mask):
+        out = torch.cat([h(x_text_emb, x_latex_mask) for h in self.heads], dim=-1)
+        out = self.proj(out)
+        return out # (B, T, DIM_TEXT_ATTENTION)
+
+class ResLaTeXBlock(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.att = MultiHeadAttention_LaTeX()
+        self.mlp = FeedForward(DIM_TEXT_EMBEDDING)
+        self.ln1 = nn.LayerNorm(DIM_TEXT_EMBEDDING)
+        self.ln2 = nn.LayerNorm(DIM_TEXT_EMBEDDING)
+    def forward(self, x_text_emb, x_latex_mask):
+        x = x_text_emb + self.att(self.ln1(x_text_emb), x_latex_mask)
+        x = x_text_emb + self.mlp(self.ln2(x_text_emb))
+        return x
+
+
+class Cross_AttentionHead_withMask(nn.Module):
+    def __init__(self, head_size, freqs_complex_latex, freqs_complex_image_x, freqs_complex_image_y): # patch dim - dim of embedding space, head_size - dim of head space
+        super().__init__()
+        self.freqs_complex = freqs_complex_latex
+        self.freqs_complex_image_x = freqs_complex_image_x
+        self.freqs_complex_image_y = freqs_complex_image_y
+
+        self.key = nn.Linear(DIM_IMAGE_EMBEDDING, head_size, bias=False) # (B, T1, head_size)
+        self.query = nn.Linear(DIM_TEXT_EMBEDDING, head_size, bias=False) # (B, T2, head_size)
+        self.value = nn.Linear(DIM_IMAGE_EMBEDDING, head_size, bias=False) # (B, T1, head_size)
+    def forward(self, x_image, x_text_emb, x_latex_mask):
+        B, T, C = x_image.shape #(batch, count of elements, count of features)
+
+        k = self.key(x_image) # (B, T_k, head_size)
+        k = apply_rotary_2D_embeddings(k, self.freqs_complex_image_x, self.freqs_complex_image_y)
+
+        q = self.query(x_text_emb) # (B, T_q, head_size)
+        q = apply_rotary_1D_embeddings(q, self.freqs_complex)
+
+        v = self.value(x_text_emb) # (B, T_k, head_size)
+        wei = (q @ k.transpose(-2, -1) / (C ** 0.5)) # (B, T_q, T_k)
+        wei = wei.masked_fill(x_latex_mask.unsqueeze(-1) == 0, float("-inf")) # padding mask (by columns)
+        softwei = F.softmax(wei, dim=-1)
+        out = softwei @ v
+        return out # (B, T_k, head_size)
+
+
+class Cross_MultiHeadAttention(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.freqs_complex_latex = precompute_theta_1D_per_frequencies(DIM_CROSS_ATTENTION)
+        self.freqs_complex_image_x, self.freqs_complex_image_y = precompute_theta_2D_per_frequencies(DIM_CROSS_ATTENTION)
+
+        self.heads = nn.ModuleList([Cross_AttentionHead_withMask(DIM_CROSS_ATTENTION, self.freqs_complex_latex, self.freqs_complex_image_x, self.freqs_complex_image_y) for i in range(N_HEAD_CROSS_ATTENTION)])
+        self.proj = nn.Linear(N_HEAD_CROSS_ATTENTION * DIM_CROSS_ATTENTION, DIM_CROSS_EMBEDDING)
+
+    def forward(self, x_image, x_latex, x_latex_mask):
+        out = torch.cat([h(x_image, x_latex, x_latex_mask) for h in self.heads], dim=-1)
+        out = self.proj(out)
+        return out # (B, T, DIM_CROSS_EMBEDDING)
+
+class CrossAttentionBlock(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.att = Cross_MultiHeadAttention()
+        self.mlp = FeedForward(DIM_CROSS_EMBEDDING)
+        self.ln1 = nn.LayerNorm(DIM_IMAGE_EMBEDDING)
+        self.ln2 = nn.LayerNorm(DIM_TEXT_EMBEDDING)
+    def forward(self, x_latex, x_image, x_latex_mask):
+        # x_latex (B, 190, DIM_TEXT_EMBEDDING)
+        # x_image (B, T=768, DIM_IMAGE, DIM_IMAGE_EMBEDDING)
+        x = self.att(self.ln1(x_image), self.ln2(x_latex), x_latex_mask) # (B, T, DIM_CROSS_EMBEDDING)
+        x = x + self.mlp(x)
+        return x # (B, T, DIM_CROSS_EMBEDDING)
+
 class FormulaAI(nn.Module):
     def __init__(self):
         super().__init__()
-        self.image_emb = nn.Linear(D_PIC, DIM_EMBEDDING)
-        self.transformers = nn.Sequential(
+        self.image_emb = nn.Linear(D_PIC, DIM_IMAGE_EMBEDDING)
+        self.VIT_transformers = nn.Sequential(
+            ResLaTeXBlock(),
+            ResLaTeXBlock()
+        )
+        self.latex_transformers = nn.Sequential(
             ResViTBlock(),
             ResViTBlock()
         )
-        self.token_embedding_table = nn.Embedding(MAX_LEN_OF_TEXT_CONTEXT, DIM_TEXT_EMBEDDING)
+        self.token_embedding_table = nn.Embedding(VOCAB_SIZE, DIM_TEXT_EMBEDDING)
+        self.cross_attention = nn.Sequential(
+            CrossAttentionBlock(),
+        )
 
     def forward(self, x_image, x_latex, y):
         x_image_emb = self.image_emb(x_image)
-        x_image_tr = self.transformers(x_image_emb)
+        x_image_VIT = self.VIT_transformers(x_image_emb) #
 
-        x_text_emb = self.token_embedding_table(x_latex) #(B, T, C)
+        # x_latex:
+        # [[301, 178, 204, 303, 303, .., 303]]     [302] - not here, because it's x_latex, not target
+
+        x_latex_mask = Tkn.mask_padding(x_latex)
+        x_text_emb = self.token_embedding_table(x_latex) #(B, T, DIM_TEXT_EMBEDDING)
+        x_processed_latex = self.latex_transformers(x_text_emb, x_latex_mask)
+
+
 
 
 

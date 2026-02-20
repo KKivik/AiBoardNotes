@@ -79,11 +79,11 @@ class PreparedDataset(Dataset):
 
         latex_x = cut_latex[:-1]
         latex_y = cut_latex[1:]
-        pad_len = self.max_len - len(latex_x)
+        pad_len = self.max_len - len(latex_x) - 1
         latex_x = latex_x + [self.padding] * pad_len
         latex_y = latex_y + [self.padding] * pad_len
 
-        return image, latex_x, latex_y # (X:image, latex_x:latex_in, latex_y: target)
+        return image, torch.tensor(latex_x), torch.tensor(latex_y) # (X:image, latex_x:latex_in, latex_y: target)
 
 
 # путь при скачивании
