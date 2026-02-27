@@ -12,9 +12,9 @@ load_dotenv()
 
 # MODEL WEIGHTS
 DIM_IMAGE_EMBEDDING = 512
-DIM_ATTENTION = 256
+DIM_ATTENTION = 128
 D_PIC = 400
-N_HEAD_ATTENTION = 64
+N_HEAD_ATTENTION = 32
 
 # PICTURE
 N_CONTEXT = 768  # num of patched in picture
@@ -25,14 +25,14 @@ KERNEL = 20
 # TEXT PARAMETERS
 MAX_LEN_OF_TEXT_CONTEXT = 188 + 1  # 187 - max len of tokens sequence (mean text in utf-8). 1 - special token for start of sequence
 DIM_TEXT_EMBEDDING = 128
-DIM_TEXT_ATTENTION = 128
+DIM_TEXT_ATTENTION = 64
 N_HEAD_LATEX_ATTENTION = 32
 VOCAB_SIZE = 303
 
 # CROSS-MECHANISM PARAMETERS
-DIM_CROSS_EMBEDDING = 512
+DIM_CROSS_EMBEDDING = 256
 N_HEAD_CROSS_ATTENTION = 32
-DIM_CROSS_ATTENTION = 256
+DIM_CROSS_ATTENTION = 128
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -297,7 +297,7 @@ class FormulaAI(nn.Module):
         self.image_to_emb = nn.Linear(D_PIC, DIM_IMAGE_EMBEDDING)
         self.VIT_transformers = nn.Sequential(
             ResViTBlock(),
-            ResViTBlock()
+            ResViTBlock(),
         )
         self.latex_transformers = nn.Sequential(
             ResLaTeXBlock()
@@ -342,17 +342,17 @@ EPOCHS = 10
 
 losses = []
 cnt = 0
-if __name__ == "__main__":
-    for epoch in trange(EPOCHS):
-        for sample in dl_train:
-            logits, loss = model(sample)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            losses.append(loss.item())
-            cnt += 1
-            #if cnt % 1000 == 0:
-            print(loss.item())
+#if __name__ == "__main__":
+for epoch in trange(EPOCHS):
+    for sample in dl_train:
+        logits, loss = model(sample)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        losses.append(loss.item())
+        cnt += 1
+        #if cnt % 1000 == 0:
+        print(loss.item())
 
 
 

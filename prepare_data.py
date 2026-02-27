@@ -102,5 +102,5 @@ print("датасет MathWriting-human загружен успешно")
 ds_train = PreparedDataset(dataset, mode="train")
 ds_test = PreparedDataset(dataset, mode="test")
 
-dl_train = DataLoader(ds_train, batch_size=128)
-dl_test = DataLoader(ds_test, batch_size=128)
+dl_train = DataLoader(ds_train, batch_size=64)
+dl_test = DataLoader(ds_test, batch_size=64)
