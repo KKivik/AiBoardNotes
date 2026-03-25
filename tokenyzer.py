@@ -66,5 +66,7 @@ class Tokenyzer:
 if __name__ == "__main__":
     Tkn = Tokenyzer()
     print(Tkn.decode(Tkn.encode("lalala")))
+    import torch
+    print(Tkn.mask_padding(torch.tensor([301, 302, 303, 303])))
 
 

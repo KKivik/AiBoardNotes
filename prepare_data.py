@@ -14,6 +14,10 @@ load_dotenv()
 
 W = int(os.getenv("W"))
 H = int(os.getenv("H"))
+formula_start = int(os.getenv("formula_start"))
+formula_end = int(os.getenv("formula_end"))
+padding = int(os.getenv("padding"))
+
 
 Tkn = Tokenyzer()
 
@@ -44,7 +48,8 @@ class SmartResizer(torch.nn.Module):
             border = random.randint(1, dy + 1)
             pd = border
             pu = dy - border
-        padder = transforms.Pad((pl, pu, pr, pd))  # left, top, right and bottom
+        #padder = transforms.Pad((pl, pu, pr, pd))  # left, top, right and bottom
+        padder = transforms.Pad((pl, pu, pr, pd), fill=1)  # left, top, right and bottom
         img = padder(img)
         return img
 
@@ -85,11 +90,45 @@ class PreparedDataset(Dataset):
 
         latex_x = cut_latex[:-1]
         latex_y = cut_latex[1:]
-        pad_len = self.max_len - len(latex_x) - 1
-        latex_x = latex_x + [self.padding] * pad_len
-        latex_y = latex_y + [self.padding] * pad_len
 
-        return image.squeeze(0), torch.tensor(latex_x), torch.tensor(latex_y) # (X:image, latex_x:latex_in, latex_y: target)
+        # pad_len = self.max_len - len(latex_x) - 1
+        # latex_x = latex_x + [self.padding] * pad_len
+        # latex_y = latex_y + [self.padding] * pad_len
+
+        return [image.squeeze(0), latex_x, latex_y] # (X:image, latex_x:latex_in, latex_y: target)
+
+def padding_in_batch(batch):
+    image_batch, latex_x_bat, latex_y_batch = zip(*batch) # (im1, im2, ..), (latex_x_1, latex_x_..), (latex_y_1, latex_y_2,...)
+    max_len = -1
+    for i in range(len(batch)):
+        latex_x_temp = batch[i][1]
+        max_len = max(max_len, len(latex_x_temp))
+
+    image_out = torch.stack(list(image_batch))
+    latex_x_out = torch.zeros((len(batch), max_len), dtype=torch.long)
+    latex_y_out = torch.zeros((len(batch), max_len), dtype=torch.long)
+
+    for i in range(len(batch)):
+        latex_x = batch[i][1]
+        latex_y = batch[i][2]
+        pad_len = max_len - len(latex_x)
+        cur_lat_x = torch.tensor(latex_x + [padding] * pad_len)
+        cur_lat_y = torch.tensor(latex_y + [padding] * pad_len)
+        # torch.stack((latex_x_out, cur_lat_x), 0)
+        # torch.stack((latex_y_out, cur_lat_y), 0)
+        latex_x_out[i] = cur_lat_x
+        latex_y_out[i] = cur_lat_y
+
+    #
+    # for i in range(len(batch)):
+    #     latex_x = batch[i][1]
+    #     latex_y = batch[i][2]
+    #     pad_len = max_len - len(latex_x) - 1
+    #     batch[i][1] = torch.tensor(latex_x + [padding] * pad_len)
+    #     batch[i][2] = torch.tensor(latex_y + [padding] * pad_len)
+    return image_out, latex_x_out, latex_y_out
+
+
 
 
 # путь при скачивании
@@ -102,5 +141,6 @@ print("датасет MathWriting-human загружен успешно")
 ds_train = PreparedDataset(dataset, mode="train")
 ds_test = PreparedDataset(dataset, mode="test")
 
-dl_train = DataLoader(ds_train, batch_size=64)
-dl_test = DataLoader(ds_test, batch_size=64)
+dl_train = DataLoader(ds_train, batch_size=64, shuffle=True, collate_fn=padding_in_batch)
+# dl_train = DataLoader(ds_train, batch_size=64, shuffle=True)
+dl_test = DataLoader(ds_test, batch_size=64, shuffle=True)
