@@ -7,3 +7,5 @@ my_dataset_folder/deepcopy___math_writing-human/default/0.0.0/d0a406be8326d3b482
 checkpoints_18.03.26/
 checkpoints_25.03.26/
 checkpoints_first/
+/checkpoints_28.03.26
+*.pt

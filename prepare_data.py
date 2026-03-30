@@ -49,7 +49,7 @@ class SmartResizer(torch.nn.Module):
             pd = border
             pu = dy - border
         #padder = transforms.Pad((pl, pu, pr, pd))  # left, top, right and bottom
-        padder = transforms.Pad((pl, pu, pr, pd), fill=1)  # left, top, right and bottom
+        padder = transforms.Pad((pl, pu, pr, pd), fill=0)  # left, top, right and bottom
         img = padder(img)
         return img
 
@@ -63,7 +63,7 @@ class PreparedDataset(Dataset):
             transforms.ColorJitter(contrast=(5, 5)),  # >0 повышает яркость
             transforms.ToTensor(),  # [1, H, W], float32 [0,1]
             SmartResizer(),
-            transforms.Normalize(mean=[0.5], std=[0.5]),
+            #transforms.Normalize(mean=[0.5], std=[0.5]),
         ])
         # [301] - formula_start; [302] formula_end; [303] - padding
         self.formula_start = 301
@@ -141,6 +141,6 @@ print("датасет MathWriting-human загружен успешно")
 ds_train = PreparedDataset(dataset, mode="train")
 ds_test = PreparedDataset(dataset, mode="test")
 
-dl_train = DataLoader(ds_train, batch_size=64, shuffle=True, collate_fn=padding_in_batch)
+dl_train = DataLoader(ds_train, batch_size=42, shuffle=True, collate_fn=padding_in_batch)
 # dl_train = DataLoader(ds_train, batch_size=64, shuffle=True)
 dl_test = DataLoader(ds_test, batch_size=64, shuffle=True)
